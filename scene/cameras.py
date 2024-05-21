@@ -14,8 +14,10 @@ from torch import nn
 import numpy as np
 from utils.graphics_utils import getWorld2View2, getProjectionMatrix
 
+import roma
+
 class Camera(nn.Module):
-    def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
+    def __init__(self, colmap_id, Q, T, FoVx, FoVy, image, gt_alpha_mask,
                  image_name, uid,
                  trans=np.array([0.0, 0.0, 0.0]), scale=1.0, data_device = "cuda"
                  ):
@@ -23,8 +25,12 @@ class Camera(nn.Module):
 
         self.uid = uid
         self.colmap_id = colmap_id
-        self.R = R
-        self.T = T
+        self.init_Q = torch.tensor(Q, dtype=torch.float32, device="cuda")
+        self.Q = nn.Parameter(self.init_Q.requires_grad_(True))
+        self.init_T = torch.tensor(T, dtype=torch.float32, device="cuda")
+        self.T =  nn.Parameter(self.init_T.requires_grad_(True))
+        # self.R = R
+        # self.T = T
         self.FoVx = FoVx
         self.FoVy = FoVy
         self.image_name = image_name
@@ -50,11 +56,20 @@ class Camera(nn.Module):
 
         self.trans = trans
         self.scale = scale
+        
+        # self.optimizer = torch.optim.Adam(self.parameters(), lr=0.0001)
+        
+    def get_extrinsic_camcenter(self):
+        R = roma.unitquat_to_rotmat(self.Q)
+        Rt = torch.zeros((4, 4), dtype=torch.float32).to(self.Q.device)
+        Rt[:3, :3] = R
+        Rt[:3, 3] = self.T
+        Rt[3, 3] = 1.0
 
-        self.world_view_transform = torch.tensor(getWorld2View2(R, T, trans, scale)).transpose(0, 1).cuda()
-        self.projection_matrix = getProjectionMatrix(znear=self.znear, zfar=self.zfar, fovX=self.FoVx, fovY=self.FoVy).transpose(0,1).cuda()
-        self.full_proj_transform = (self.world_view_transform.unsqueeze(0).bmm(self.projection_matrix.unsqueeze(0))).squeeze(0)
-        self.camera_center = self.world_view_transform.inverse()[3, :3]
+        extrinsic_matrix = Rt[:3, :]
+        world_view_transform = Rt.transpose(0, 1)
+        camera_center = world_view_transform.inverse()[3, :3]
+        return extrinsic_matrix, camera_center
 
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):

@@ -14,6 +14,9 @@ import numpy as np
 from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
 
+import torch
+import roma
+
 WARNED = False
 
 def loadCam(args, id, cam_info, resolution_scale):
@@ -45,8 +48,13 @@ def loadCam(args, id, cam_info, resolution_scale):
 
     if resized_image_rgb.shape[1] == 4:
         loaded_mask = resized_image_rgb[3:4, ...]
-
-    return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
+        
+    # transform Rmat to uquat
+    R = torch.from_numpy(cam_info.R)
+    xyzw = roma.rotmat_to_unitquat(R.unsqueeze(0)).squeeze(0)
+    xyzw = xyzw.cpu().numpy()
+    
+    return Camera(colmap_id=cam_info.uid, Q=xyzw, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
                   image=gt_image, gt_alpha_mask=loaded_mask,
                   image_name=cam_info.image_name, uid=id, data_device=args.data_device)
