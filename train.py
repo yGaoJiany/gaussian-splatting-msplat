@@ -36,6 +36,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     gaussians.training_setup(opt)
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
+        print(f"load from {checkpoint}, from iteration {first_iter}...")
         gaussians.restore(model_params, opt)
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
@@ -48,7 +49,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     ema_loss_for_log = 0.0
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
-    for iteration in range(first_iter, opt.iterations + 1):        
+    
+    for iteration in range(first_iter, opt.iterations + 1):
+        
         if network_gui.conn == None:
             network_gui.try_connect()
         while network_gui.conn != None:
@@ -140,6 +143,23 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
+def profile(dataset, opt, pipe):
+    gaussians = GaussianModel(dataset.sh_degree)
+    scene = Scene(dataset, gaussians)
+    
+    viewpoint_stack = scene.getTrainCameras().copy()
+    viewpoint_cam = viewpoint_stack[0]
+    
+    bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
+    background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
+    
+    bg = torch.rand((3), device="cuda") if opt.random_background else background
+    
+    with torch.autograd.profiler.profile(enabled=True, use_cuda=True, record_shapes=False, profile_memory=False) as prof:
+        render_pkg = render(viewpoint_cam, gaussians, pipe, bg)
+    
+    prof.export_chrome_trace("torch_sort_trace.json")
+
 def prepare_output_and_logger(args):    
     if not args.model_path:
         if os.getenv('OAR_JOB_ID'):
@@ -209,11 +229,12 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[1000, 3000, 5000, 7000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
+    parser.add_argument("--profile", action='store_true')
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
     
@@ -221,7 +242,11 @@ if __name__ == "__main__":
 
     # Initialize system state (RNG)
     safe_state(args.quiet)
-
+    
+    if args.profile:
+        profile(lp.extract(args), op.extract(args), pp.extract(args))
+        exit(-1)
+    
     # Start GUI server, configure and run training
     # network_gui.init(args.ip, args.port)
     torch.autograd.set_detect_anomaly(args.detect_anomaly)

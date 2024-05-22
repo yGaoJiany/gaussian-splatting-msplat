@@ -40,10 +40,9 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     cy = float(height) / 2
     
     intrinsic_params = torch.tensor([fx, fy, cx, cy]).cuda().float()
-    # extrinsic_matrix = viewpoint_camera.world_view_transform
-    # extrinsic_matrix = extrinsic_matrix[:3, :]
-    # camera_center = viewpoint_camera.camera_center
-    extrinsic_matrix, camera_center = viewpoint_camera.get_extrinsic_camcenter()
+    extrinsic_matrix = viewpoint_camera.world_view_transform.transpose(0, 1)
+    extrinsic_matrix = extrinsic_matrix[:3, :]
+    camera_center = viewpoint_camera.camera_center
     
     opacity = pc.get_opacity
     shs = pc.get_features.permute(0, 2, 1)
@@ -51,11 +50,12 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     rotation = pc.get_rotation
 
     # project points and perform culling
-    (uv, depth) = ms.project_point(
-        position,
-        intrinsic_params,
-        extrinsic_matrix,
-        width, height)
+    with torch.profiler.record_function("project_point"):
+        (uv, depth) = ms.project_point(
+            position,
+            intrinsic_params,
+            extrinsic_matrix,
+            width, height)
 
     visible = depth != 0
 
@@ -64,28 +64,32 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
                 camera_center.repeat(position.shape[0], 1))
     direction = direction / direction.norm(dim=1, keepdim=True)
     
-    sh2rgb = ms.compute_sh(shs, direction, visible)
+    with torch.profiler.record_function("compute_sh"):
+        sh2rgb = ms.compute_sh(shs, direction, visible)
     rgb = torch.clamp_min(sh2rgb + 0.5, 0.0)
     
     # compute cov3d
-    cov3d = ms.compute_cov3d(scaling, rotation, visible)
+    with torch.profiler.record_function("compute_cov3d"):
+        cov3d = ms.compute_cov3d(scaling, rotation, visible)
 
     # ewa project
-    (conic, radius, tiles_touched) = ms.ewa_project(
-        position,
-        cov3d,
-        intrinsic_params,
-        extrinsic_matrix,
-        uv,
-        width,
-        height,
-        visible
-    )
+    with torch.profiler.record_function("ewa_project"):
+        (conic, radius, tiles_touched) = ms.ewa_project(
+            position,
+            cov3d,
+            intrinsic_params,
+            extrinsic_matrix,
+            uv,
+            width,
+            height,
+            visible
+        )
 
     # sort
-    (gaussian_ids_sorted, tile_range) = ms.sort_gaussian(
-        uv, depth, width, height, radius, tiles_touched
-    )
+    with torch.profiler.record_function("sort_gaussian"):
+        (gaussian_ids_sorted, tile_range) = ms.sort_gaussian(
+            uv, depth, width, height, radius, tiles_touched
+        )
     
     # render
     ndc = torch.zeros_like(uv, requires_grad=True)
@@ -95,10 +99,11 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         raise ValueError("ndc does not have grad")
 
     # alpha blending
-    render = ms.alpha_blending(
-        uv, conic, opacity, rgb,
-        gaussian_ids_sorted, tile_range, bg_color[0].item(), width, height, ndc
-    )
+    with torch.profiler.record_function("alpha_blending"):
+        render = ms.alpha_blending(
+            uv, conic, opacity, rgb,
+            gaussian_ids_sorted, tile_range, bg_color[0].item(), width, height, ndc
+        )
     
     return {"render": render,
             "viewspace_points": ndc,
