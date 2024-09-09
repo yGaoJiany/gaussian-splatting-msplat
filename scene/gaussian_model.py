@@ -50,8 +50,11 @@ class GaussianModel:
         self._scaling = torch.empty(0)
         self._rotation = torch.empty(0)
         self._opacity = torch.empty(0)
+
+        self.sh_mask = torch.empty(0)                # for msplat2 SH warning up
         self.max_radii2D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(0)
+        self.xyz_gradient_accum_abs = torch.empty(0)
         self.denom = torch.empty(0)
         self.optimizer = None
         self.percent_dense = 0
@@ -69,6 +72,7 @@ class GaussianModel:
             self._opacity,
             self.max_radii2D,
             self.xyz_gradient_accum,
+            self.xyz_gradient_accum_abs,
             self.denom,
             self.optimizer.state_dict(),
             self.spatial_lr_scale,
@@ -84,11 +88,13 @@ class GaussianModel:
         self._opacity,
         self.max_radii2D, 
         xyz_gradient_accum, 
+        xyz_gradient_accum_abs, 
         denom,
         opt_dict, 
         self.spatial_lr_scale) = model_args
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
+        self.xyz_gradient_accum_abs = xyz_gradient_accum_abs
         self.denom = denom
         self.optimizer.load_state_dict(opt_dict)
 
@@ -149,6 +155,7 @@ class GaussianModel:
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.xyz_gradient_accum_abs = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
 
         l = [
@@ -300,6 +307,7 @@ class GaussianModel:
         self._rotation = optimizable_tensors["rotation"]
 
         self.xyz_gradient_accum = self.xyz_gradient_accum[valid_points_mask]
+        self.xyz_gradient_accum_abs = self.xyz_gradient_accum_abs[valid_points_mask]
 
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
@@ -343,6 +351,7 @@ class GaussianModel:
         self._rotation = optimizable_tensors["rotation"]
 
         self.xyz_gradient_accum = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
+        self.xyz_gradient_accum_abs = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
@@ -386,12 +395,19 @@ class GaussianModel:
 
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
 
-    def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size):
+    def densify_and_prune(self, max_grad, max_grad_abs, min_opacity, extent, max_screen_size):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
 
+        grads_abs = self.xyz_gradient_accum_abs / self.denom
+        grads_abs[grads.isnan()] = 0.0
+
         self.densify_and_clone(grads, max_grad, extent)
-        self.densify_and_split(grads, max_grad, extent)
+
+        if torch.all(grads_abs.eq(0)) or max_grad_abs == 0:
+            self.densify_and_split(grads, max_grad, extent)
+        else:
+            self.densify_and_split(grads_abs, max_grad_abs, extent)
 
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         if max_screen_size:
@@ -402,6 +418,26 @@ class GaussianModel:
 
         torch.cuda.empty_cache()
 
-    def add_densification_stats(self, viewspace_point_tensor, update_filter):
-        self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
-        self.denom[update_filter] += 1
+    def update_density_control_stats(self, batch_viewspace_point_tensor, batch_visibility_filter, batch_radii):
+        # for msplat2 batch processing
+
+        # batch_viewspace_point_tensor [B, N, 2]
+        # batch_visibility_filter [B, N]
+        # batch_radii [B, N]
+
+        # Keep track of max radii in image-space for pruning
+        visibility_filter = torch.any(batch_visibility_filter, dim=0)
+        radii = torch.max(batch_radii, dim=0).values
+        self.max_radii2D[visibility_filter] = torch.max(self.max_radii2D[visibility_filter], radii[visibility_filter])
+
+        # accumulate gradient in image-space for densification
+        # Compute gradients for all batches at once
+        normed_grad = torch.norm(batch_viewspace_point_tensor.grad[:, :, :2], dim=-1, keepdim=True)
+        normed_grad_abs = torch.norm(batch_viewspace_point_tensor.grad[:, :, 2:], dim=-1, keepdim=True)
+
+        # Apply visibility filter to gradients and sum them up across the batch dimension
+        self.xyz_gradient_accum += torch.sum(normed_grad * batch_visibility_filter.unsqueeze(-1).float(), dim=0)
+        self.xyz_gradient_accum_abs += torch.sum(normed_grad_abs * batch_visibility_filter.unsqueeze(-1).float(), dim=0)
+
+        # Update denominator by counting the number of visible points per batch
+        self.denom += batch_visibility_filter.int().sum(dim=0, keepdim=False)[..., None]

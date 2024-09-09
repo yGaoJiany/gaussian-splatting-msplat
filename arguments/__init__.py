@@ -46,7 +46,8 @@ class ParamGroup:
 
 class ModelParams(ParamGroup): 
     def __init__(self, parser, sentinel=False):
-        self.sh_degree = 3
+        self.sh_degree = 3                       # msplat2: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        self._batch = 1                          # msplat2: batch size
         self._source_path = ""
         self._model_path = ""
         self._images = "images"
@@ -66,6 +67,13 @@ class PipelineParams(ParamGroup):
         self.convert_SHs_python = False
         self.compute_cov3D_python = False
         self.debug = False
+
+        self.homo_grad = False                   # msplat2: accumulate homodirection gradient or not
+        self.is_ortho_cam = False                # msplat2: is camera an orthographic camera?
+        self.sort_method = "radix"               # msplat2: "radix" or "merge"
+        self.inter_method = "aabb"               # msplat2: "aabb", "obb", "cobb"
+        self.render_mode = "dmtr"                # msplat2: "dmtr, depth, normal, alpha, aux"
+        
         super().__init__(parser, "Pipeline Parameters")
 
 class OptimizationParams(ParamGroup):
@@ -86,6 +94,7 @@ class OptimizationParams(ParamGroup):
         self.densify_from_iter = 500
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0002
+        self.densify_grad_abs_threshold = 0.0004
         self.random_background = False
         super().__init__(parser, "Optimization Parameters")
 
