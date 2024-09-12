@@ -1,3 +1,44 @@
+
+# 3D Gaussian Splatting with Msplat2
+
+This is a migration from the [offical kernel](https://github.com/graphdeco-inria/diff-gaussian-rasterization) implementation to [Msplat2](https://github.com/pointrix-project/msplat).
+
+For details of the **new features** and implementation **differences**, please refer to the Msplat2 document👉️: [link](https://github.com/pointrix-project/msplat).
+
+## Install Msplat2
+Install the package via pip:
+
+```
+pip install msplat
+```
+
+Alternatively, you can install from the source:
+
+```
+# clone repo and submodules from github
+git clone https://github.com/pointrix-project/msplat.git --recursive
+cd msplat
+
+# install msplat
+pip install .
+```
+
+When installing from the source, CUDA 12.1 is recommended.
+
+If you find Msplat2 helpful, please consider to cite:
+```
+
+```
+
+---
+
+<br>
+<p align="center" style="font-size:20px;">Then, Enjoy Your Splatting!😆</p>
+<br>
+<br>
+
+---
+
 # 3D Gaussian Splatting for Real-Time Radiance Field Rendering
 Bernhard Kerbl*, Georgios Kopanas*, Thomas Leimkühler, George Drettakis (* indicates equal contribution)<br>
 | [Webpage](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/) | [Full Paper](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/3d_gaussian_splatting_high.pdf) | [Video](https://youtu.be/T_kXY43VZnk) | [Other GRAPHDECO Publications](http://www-sop.inria.fr/reves/publis/gdindex.php) | [FUNGRAPH project page](https://fungraph.inria.fr) |<br>

@@ -86,7 +86,7 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
     # project points and perform culling
     with torch.no_grad():
         uvd = mpf.project_point(position, intrinsic_params, extrinsic_matrix, cam_type=camera_type)
-        visible = torch.logical_and(uvd[..., 2:] != 0, uvd[..., 0:1] < 1.3 * width)
+        visible = torch.logical_and(uvd[..., 2:] >= 0, uvd[..., 0:1] < 1.3 * width)
         visible = torch.logical_and(visible, uvd[..., 0:1] > -0.3 * width)
         visible = torch.logical_and(visible, uvd[..., 1:2] < 1.3 * height)
         visible = torch.logical_and(visible, uvd[..., 1:2] > -0.3 * height)
@@ -95,12 +95,13 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
     direction = (position[None] - camera_center[:, None, :])      # [B, N, 3]
     direction = direction / direction.norm(dim=2, keepdim=True)
     
-    sh = mp.SphericalHarmonics(shs)
+    # set is_standard to false for alignment of the original 3DGS
+    sh = mp.SphericalHarmonics(shs, is_standard=False) 
     sh2rgb = sh.eval(direction, visible=visible)
     rgb = torch.clamp_min(sh2rgb + 0.5, 0.0)
 
     # ewa project
-    uvd, conic = mpf.ewa_project(
+    uvd, cov2d, conic = mpf.ewa_project(
         position, 
         scaling, 
         rotation, 
@@ -111,7 +112,7 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
 
     # sort
     key, index, radius = mpf.compute_gaussian_key(
-        uvd, conic, (height, width), inter_type=inter_method, sort_method=sort_method)
+        uvd, cov2d, (height, width), inter_type=inter_method, sort_method=sort_method)
     tile_range = mpf.compute_tile_range(key, (height, width))
 
     # render
@@ -141,21 +142,6 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
         cam_type=camera_type,
         mode=render_mode
     )
-
-    # msplat 1
-    # import m_splat
-
-    # rfeat = m_splat.alpha_blending(
-    #     uvd[0, :, :2],
-    #     conic[0],
-    #     opacity, 
-    #     rgb[0], 
-    #     index, 
-    #     tile_range[0], 
-    #     0, 
-    #     width, 
-    #     height, 
-    #     ndc[0, :, :2])
 
     return {"render": rfeat,
             "ralpha": ralpha,
