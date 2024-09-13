@@ -237,8 +237,8 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--debug_from', type=int, default=-1)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
-    parser.add_argument("--test_iterations", nargs="+", type=int, default=[500, 1000, 3000,  7_000, 30_000])
-    parser.add_argument("--save_iterations", nargs="+", type=int, default=[500, 1000, 3000, 7_000, 30_000])
+    parser.add_argument("--test_iterations", nargs="+", type=int, default=[500, 1000, 3000, 5000,  7_000, 30_000])
+    parser.add_argument("--save_iterations", nargs="+", type=int, default=[500, 1000, 3000, 5000, 7_000, 30_000])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
@@ -264,3 +264,4 @@ if __name__ == "__main__":
     print("\nTraining complete.")
 
     # python train.py -s E:\200data\360_v2\flowers -i images_4 -m ./debug/flowers --eval
+    # python train.py -s E:\200data\360_v2\flowers -r 4 --eval --iterations 7000 --densify_from_iter 7000 
