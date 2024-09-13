@@ -421,23 +421,26 @@ class GaussianModel:
     def update_density_control_stats(self, batch_viewspace_point_tensor, batch_visibility_filter, batch_radii):
         # for msplat2 batch processing
 
-        # batch_viewspace_point_tensor [B, N, 2]
-        # batch_visibility_filter [B, N]
-        # batch_radii [B, N]
+        # batch_viewspace_point_tensor [B, P, 4]
+        # batch_visibility_filter [B, P]
+        # batch_radii [B, P]
 
         # Keep track of max radii in image-space for pruning
-        visibility_filter = torch.any(batch_visibility_filter, dim=0)
+        visibility_filter = torch.any(batch_visibility_filter, dim=0) # [P]
         radii = torch.max(batch_radii, dim=0).values
         self.max_radii2D[visibility_filter] = torch.max(self.max_radii2D[visibility_filter], radii[visibility_filter])
 
         # accumulate gradient in image-space for densification
         # Compute gradients for all batches at once
-        normed_grad = torch.norm(batch_viewspace_point_tensor.grad[:, :, :2], dim=-1, keepdim=True)
-        normed_grad_abs = torch.norm(batch_viewspace_point_tensor.grad[:, :, 2:], dim=-1, keepdim=True)
+        # [B, P]
+        normed_grad = torch.norm(batch_viewspace_point_tensor.grad[:, :, :2], dim=-1)
+        normed_grad_abs = torch.norm(batch_viewspace_point_tensor.grad[:, :, 2:], dim=-1)
 
         # Apply visibility filter to gradients and sum them up across the batch dimension
-        self.xyz_gradient_accum += torch.sum(normed_grad * batch_visibility_filter.unsqueeze(-1).float(), dim=0)
-        self.xyz_gradient_accum_abs += torch.sum(normed_grad_abs * batch_visibility_filter.unsqueeze(-1).float(), dim=0)
+        # [P, 1]
+        self.xyz_gradient_accum += torch.sum(normed_grad * batch_visibility_filter.float(), dim=0).unsqueeze(-1)
+        self.xyz_gradient_accum_abs += torch.sum(normed_grad_abs * batch_visibility_filter.float(), dim=0).unsqueeze(-1)
 
         # Update denominator by counting the number of visible points per batch
-        self.denom += batch_visibility_filter.int().sum(dim=0, keepdim=False)[..., None]
+        # [P, 1]
+        self.denom += batch_visibility_filter.int().sum(dim=0).unsqueeze(-1)
