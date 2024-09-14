@@ -106,7 +106,7 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
         visible = torch.logical_and(visible, uvd[..., 1:2] > -0.3 * height)
 
     # ewa project
-    uvd, cov2d, conic = mpf.ewa_project(
+    uvd, conic = mpf.ewa_project(
         position, 
         scaling, 
         rotation, 
@@ -130,7 +130,7 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
 
     # sort
     key, index, radius = mpf.compute_gaussian_key(
-        uvd, cov2d, (height, width), inter_type=inter_method, sort_method=sort_method)
+        uvd, conic, (height, width), inter_type=inter_method, sort_method=sort_method)
     tile_range = mpf.compute_tile_range(key, (height, width))
 
     # index, tile_range = m_splat.sort_gaussian(uvd[0, :, :2], uvd[0, :, -1:], width, height, radius[0], tiles[0])
