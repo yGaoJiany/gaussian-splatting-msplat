@@ -395,7 +395,7 @@ class GaussianModel:
 
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
 
-    def densify_and_prune(self, max_grad, max_grad_abs, min_opacity, extent, max_screen_size):
+    def densify_and_prune(self, max_grad, max_grad_abs, min_opacity, extent, max_screen_size, use_homo_grad=False):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
 
@@ -403,11 +403,10 @@ class GaussianModel:
         grads_abs[grads.isnan()] = 0.0
 
         self.densify_and_clone(grads, max_grad, extent)
-
-        if torch.all(grads_abs.eq(0)) or max_grad_abs == 0:
-            self.densify_and_split(grads, max_grad, extent)
-        else:
+        if use_homo_grad:
             self.densify_and_split(grads_abs, max_grad_abs, extent)
+        else:
+            self.densify_and_split(grads, max_grad, extent)
 
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         if max_screen_size:
@@ -424,6 +423,9 @@ class GaussianModel:
         # batch_viewspace_point_tensor [B, P, 4]
         # batch_visibility_filter [B, P]
         # batch_radii [B, P]
+        assert len(batch_viewspace_point_tensor) == 3
+        assert len(batch_visibility_filter) == 2
+        assert len(batch_radii) == 2
 
         # Keep track of max radii in image-space for pruning
         visibility_filter = torch.any(batch_visibility_filter, dim=0) # [P]

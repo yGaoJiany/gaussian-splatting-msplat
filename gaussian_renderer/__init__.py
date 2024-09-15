@@ -85,18 +85,6 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
     extrinsic_matrix = torch.stack(extrinsic_matrix, dim=0)        # [B, 3, 4]
     camera_center = torch.stack(camera_center, dim=0)              # [B, 3]
 
-    # msplat1
-    # uv, depth = m_splat.project_point(position, intrinsic_params[0], extrinsic_matrix[0], width, height, 0)
-    # visible = depth != 0
-    # uvd = torch.concat([uv, depth], dim=-1).unsqueeze(0)
-    # visible = visible.unsqueeze(0)
-
-    # cov3d = m_splat.compute_cov3d(scaling, rotation, visible=visible[0])
-    # conic, radius, tiles = m_splat.ewa_project(position, cov3d, intrinsic_params[0], extrinsic_matrix[0], uv, width, height, visible[0])
-    # conic = conic.unsqueeze(0)
-    # radius = radius.unsqueeze(0)
-    # tiles = tiles.unsqueeze(0)
-
     # project points and perform culling
     with torch.no_grad():
         uvd = mpf.project_point(position, intrinsic_params, extrinsic_matrix, cam_type=camera_type)
@@ -124,18 +112,11 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
     sh2rgb = sh.eval(direction, visible=visible)
     rgb = torch.clamp_min(sh2rgb + 0.5, 0.0)
 
-    # sh2rgb = m_splat.compute_sh(shs, direction[0], visible)
-    # rgb = torch.clamp_min(sh2rgb + 0.5, 0.0)
-    # rgb = rgb.unsqueeze(0)
-
     # sort
     key, index, radius = mpf.compute_gaussian_key(
         uvd, conic, (height, width), inter_type=inter_method, sort_method=sort_method)
     tile_range = mpf.compute_tile_range(key, (height, width))
 
-    # index, tile_range = m_splat.sort_gaussian(uvd[0, :, :2], uvd[0, :, -1:], width, height, radius[0], tiles[0])
-    # tile_range = tile_range.unsqueeze(0)
-    
     # render
     ndc = torch.zeros((uvd.shape[0], uvd.shape[1], 4), device=uvd.device, requires_grad=True)
     try:
@@ -163,107 +144,12 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
         cam_type=camera_type,
         mode=render_mode
     )
-    # rfeat = m_splat.alpha_blending(uvd[0, :, :2], conic[0], opacity, rgb[0], index, tile_range[0], 0.0, width, height, ndc[0, :, :2])
-    # rfeat = rfeat.unsqueeze(0)
 
     return {"render": rfeat,
+            "ralpha": ralpha,
+            "rdepth": rdepth,
+            "rnormal": rnormal,
+            "raux": raux,
             "viewspace_points": ndc,
             "visibility_filter" : radius > 0, 
             "radii": radius}
-#             # "ralpha": ralpha,
-#             # "rdepth": rdepth,
-#             # "rnormal": rnormal,
-#             # "raux": raux,
-
-# def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
-#     """
-#     Render the scene with msplat.
-    
-#     Background tensor (bg_color) must be on GPU!
-#     """
-    
-#     # print("Hello, rendering with msplat.")
-    
-#     viewpoint_camera = viewpoint_camera[0]
-
-#     # tranform 3dgs to msplat
-#     position = pc.get_xyz
-#     fovx = viewpoint_camera.FoVx
-#     fovy = viewpoint_camera.FoVy
-#     width = int(viewpoint_camera.image_width)
-#     height = int(viewpoint_camera.image_height)
-    
-#     fx = fov2focal(fovx, width)
-#     fy = fov2focal(fovy, height)
-#     cx = float(width) / 2
-#     cy = float(height) / 2
-    
-#     intrinsic_params = torch.tensor([fx, fy, cx, cy]).cuda().float()
-#     extrinsic_matrix = viewpoint_camera.world_view_transform.transpose(0, 1)
-#     extrinsic_matrix = extrinsic_matrix[:3, :]
-#     camera_center = viewpoint_camera.camera_center
-    
-#     opacity = pc.get_opacity
-#     shs = pc.get_features[:, 0:(pc.active_sh_degree+1)**2, :].permute(0, 2, 1) 
-#     scaling = pc.get_scaling
-#     rotation = pc.get_rotation
-
-#     # project points and perform culling
-#     with torch.profiler.record_function("project_point"):
-#         (uv, depth) = m_splat.project_point(
-#             position,
-#             intrinsic_params,
-#             extrinsic_matrix,
-#             width, height)
-
-#     visible = depth != 0
-
-#     # compute sh if not None
-#     direction = (position - camera_center.repeat(position.shape[0], 1))
-#     direction = direction / direction.norm(dim=1, keepdim=True)
-    
-#     with torch.profiler.record_function("compute_sh"):
-#         sh2rgb = m_splat.compute_sh(shs, direction, visible)
-#     rgb = torch.clamp_min(sh2rgb + 0.5, 0.0)
-    
-#     # compute cov3d
-#     with torch.profiler.record_function("compute_cov3d"):
-#         cov3d = m_splat.compute_cov3d(scaling, rotation, visible)
-
-#     # ewa project
-#     with torch.profiler.record_function("ewa_project"):
-#         (conic, radius, tiles_touched) = m_splat.ewa_project(
-#             position,
-#             cov3d,
-#             intrinsic_params,
-#             extrinsic_matrix,
-#             uv,
-#             width,
-#             height,
-#             visible
-#         )
-
-#     # sort
-#     with torch.profiler.record_function("sort_gaussian"):
-#         (gaussian_ids_sorted, tile_range) = m_splat.sort_gaussian(
-#             uv, depth, width, height, radius, tiles_touched
-#         )
-    
-#     # render
-#     ndc = torch.zeros((1, uv.shape[0], 4), device=uv.device, requires_grad=True)
-#     try:
-#         ndc.retain_grad()
-#     except:
-#         raise ValueError("ndc does not have grad")
-
-#     # alpha blending
-#     with torch.profiler.record_function("alpha_blending"):
-#         render = m_splat.alpha_blending(
-#             uv, conic, opacity, rgb,
-#             gaussian_ids_sorted, tile_range, bg_color[0].item(), width, height, ndc[0, :, :2]
-#         )
-    
-#     return {"render": render.unsqueeze(0),
-#             "viewspace_points": ndc,
-#             "visibility_filter" : radius.unsqueeze(0) > 0,
-#             "radii": radius.unsqueeze(0)}
