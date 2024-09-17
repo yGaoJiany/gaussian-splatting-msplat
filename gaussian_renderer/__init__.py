@@ -17,10 +17,8 @@ import msplat as mp
 import msplat.types as mptype
 import msplat.functional as mpf
 
-import m_splat
 
-
-def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None):
+def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, override_color = None, prune_weight=False):
     """
     Render the scene with msplat2.
     """
@@ -35,18 +33,17 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
     inter_method = mptype.TILE_INTER_CON_OBB if pipe.inter_method == "cobb" else inter_method
 
     render_mode = mptype.RenderType(0)
-    render_type = pipe.render_mode.split(", ")
-    if "dmtr" in render_type:
+    if "dmtr" in pipe.render_mode:
         render_mode = render_mode | mptype.RENDERTYPE_DMTR
-    if "depth" in render_type:
+    if "depth" in pipe.render_mode:
         render_mode = render_mode | mptype.RENDERTYPE_DEPTH
-    if "normal" in render_type:
+    if "normal" in pipe.render_mode:
         render_mode = render_mode | mptype.RENDERTYPE_NORMAL
-    if "alpha" in render_type:
+    if "alpha" in pipe.render_mode:
         render_mode = render_mode | mptype.RENDERTYPE_ALPHA
-    if "aux" in render_type:
+    if "aux" in pipe.render_mode:
         render_mode = render_mode | mptype.RENDERTYPE_AUXILIARY
-
+    
     # get gaussian properties 
     position = pc.get_xyz
     opacity = pc.get_opacity
@@ -123,8 +120,9 @@ def render(batch_camera: list, pc : GaussianModel, pipe, bg_color : torch.Tensor
         ndc.retain_grad()
     except:
         raise ValueError("ndc does not have grad")
-
+    
     # alpha blending
+    bg_color = bg_color[None, :, None, None].repeat(len(batch_camera), 1, height, width)
     rfeat, ralpha, rdepth, rnormal, raux = mpf.alpha_blending(
         uvd, 
         conic, 

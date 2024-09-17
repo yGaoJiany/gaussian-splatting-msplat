@@ -129,7 +129,7 @@ def storePly(path, xyz, rgb):
     ply_data = PlyData([vertex_element])
     ply_data.write(path)
 
-def readColmapSceneInfo(path, images, eval, llffhold=8):
+def readColmapSceneInfo(path, images, eval, load_max_error=2.0, load_min_track=3.0, llffhold=8):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -157,13 +157,17 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
     ply_path = os.path.join(path, "sparse/0/points3D.ply")
     bin_path = os.path.join(path, "sparse/0/points3D.bin")
     txt_path = os.path.join(path, "sparse/0/points3D.txt")
-    if not os.path.exists(ply_path):
-        print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
-        try:
-            xyz, rgb, _ = read_points3D_binary(bin_path)
-        except:
-            xyz, rgb, _ = read_points3D_text(txt_path)
-        storePly(ply_path, xyz, rgb)
+    
+    if os.path.exists(ply_path):
+        os.remove(ply_path)
+
+    print("Converting point3d.bin to .ply.")
+    try:
+        xyz, rgb, _ = read_points3D_binary(bin_path, load_max_error, load_min_track)
+    except:
+        xyz, rgb, _ = read_points3D_text(txt_path, load_max_error, load_min_track)
+    
+    storePly(ply_path, xyz, rgb)
     try:
         pcd = fetchPly(ply_path)
     except:

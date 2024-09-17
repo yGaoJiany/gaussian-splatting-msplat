@@ -80,7 +80,7 @@ def read_next_bytes(fid, num_bytes, format_char_sequence, endian_character="<"):
     data = fid.read(num_bytes)
     return struct.unpack(endian_character + format_char_sequence, data)
 
-def read_points3D_text(path):
+def read_points3D_text(path, load_max_error, load_min_track):
     """
     see: src/base/reconstruction.cc
         void Reconstruction::ReadPoints3DText(const std::string& path)
@@ -115,20 +115,30 @@ def read_points3D_text(path):
                 xyz = np.array(tuple(map(float, elems[1:4])))
                 rgb = np.array(tuple(map(int, elems[4:7])))
                 error = np.array(float(elems[7]))
+                track_length = int(len(elems[8:]) / 2)
+
+                if load_max_error > 0 and error > load_max_error:
+                    continue
+                if load_min_track > 0 and track_length < load_min_track:
+                    continue
+
                 xyzs[count] = xyz
                 rgbs[count] = rgb
                 errors[count] = error
                 count += 1
+    
+    xyzs = np.delete(xyzs,np.arange(count,num_points),axis=0)
+    rgbs = np.delete(rgbs, np.arange(count, num_points), axis=0)
+    errors = np.delete(errors, np.arange(count, num_points), axis=0)
 
     return xyzs, rgbs, errors
 
-def read_points3D_binary(path_to_model_file):
+def read_points3D_binary(path_to_model_file, load_max_error, load_min_track):
     """
     see: src/base/reconstruction.cc
         void Reconstruction::ReadPoints3DBinary(const std::string& path)
         void Reconstruction::WritePoints3DBinary(const std::string& path)
     """
-
 
     with open(path_to_model_file, "rb") as fid:
         num_points = read_next_bytes(fid, 8, "Q")[0]
@@ -137,6 +147,7 @@ def read_points3D_binary(path_to_model_file):
         rgbs = np.empty((num_points, 3))
         errors = np.empty((num_points, 1))
 
+        count = 0
         for p_id in range(num_points):
             binary_point_line_properties = read_next_bytes(
                 fid, num_bytes=43, format_char_sequence="QdddBBBd")
@@ -148,9 +159,21 @@ def read_points3D_binary(path_to_model_file):
             track_elems = read_next_bytes(
                 fid, num_bytes=8*track_length,
                 format_char_sequence="ii"*track_length)
-            xyzs[p_id] = xyz
-            rgbs[p_id] = rgb
-            errors[p_id] = error
+            
+            if load_max_error > 0 and error > load_max_error:
+                continue
+            if load_min_track > 0 and track_length < load_min_track:
+                continue
+
+            xyzs[count] = xyz
+            rgbs[count] = rgb
+            errors[count] = error
+            count +=1
+    
+    xyzs = np.delete(xyzs,np.arange(count,num_points),axis=0)
+    rgbs = np.delete(rgbs, np.arange(count, num_points), axis=0)
+    errors = np.delete(errors, np.arange(count, num_points), axis=0)
+
     return xyzs, rgbs, errors
 
 def read_intrinsics_text(path):

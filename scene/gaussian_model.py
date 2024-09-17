@@ -51,7 +51,6 @@ class GaussianModel:
         self._rotation = torch.empty(0)
         self._opacity = torch.empty(0)
 
-        self.sh_mask = torch.empty(0)                # for msplat2 SH warning up
         self.max_radii2D = torch.empty(0)
         self.xyz_gradient_accum = torch.empty(0)
         self.xyz_gradient_accum_abs = torch.empty(0)
@@ -219,6 +218,11 @@ class GaussianModel:
         optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
         self._opacity = optimizable_tensors["opacity"]
 
+    def reduce_opacity(self):
+        opacities_new = inverse_sigmoid(torch.min(self.get_opacity, torch.ones_like(self.get_opacity)*0.8))
+        optimizable_tensors = self.replace_tensor_to_optimizer(opacities_new, "opacity")
+        self._opacity = optimizable_tensors["opacity"]
+
     def load_ply(self, path):
         plydata = PlyData.read(path)
 
@@ -312,6 +316,15 @@ class GaussianModel:
         self.denom = self.denom[valid_points_mask]
         self.max_radii2D = self.max_radii2D[valid_points_mask]
 
+    def initial_prune(self):
+        pts_mask_1 = torch.max(self.get_scaling, dim=1).values > torch.mean(self.get_scaling)
+        prune_threshold = torch.quantile(self.get_scaling, 0.999) if len(self.get_scaling) < 500_0000 else torch.mean(self.get_scaling) * 4
+        pts_mask_2 = torch.max(self.get_scaling, dim=1).values > prune_threshold
+
+        selected_pts_mask = torch.logical_and(pts_mask_1, pts_mask_2)
+        print("Initial pruning based on scaling...")
+        self.prune_points(selected_pts_mask)
+
     def cat_tensors_to_optimizer(self, tensors_dict):
         optimizable_tensors = {}
         for group in self.optimizer.param_groups:
@@ -380,11 +393,16 @@ class GaussianModel:
         prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
         self.prune_points(prune_filter)
 
-    def densify_and_clone(self, grads, grad_threshold, scene_extent):
+    def densify_and_clone(self, grads, grad_threshold, scene_extent, opacity_correction=False):
         # Extract points that satisfy the gradient condition
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
-        selected_pts_mask = torch.logical_and(selected_pts_mask,
-                                              torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
+        selected_pts_mask = torch.logical_and(
+            selected_pts_mask, torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
+        
+        if opacity_correction:
+            corrected_opacities = torch.where(selected_pts_mask.unsqueeze(-1), inverse_sigmoid(1 - torch.sqrt(1 - self.get_opacity)), self.get_opacity)
+            optimizable_tensors = self.replace_tensor_to_optimizer(corrected_opacities, "opacity")
+            self._opacity = optimizable_tensors["opacity"]
         
         new_xyz = self._xyz[selected_pts_mask]
         new_features_dc = self._features_dc[selected_pts_mask]
@@ -395,14 +413,14 @@ class GaussianModel:
 
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
 
-    def densify_and_prune(self, max_grad, max_grad_abs, min_opacity, extent, max_screen_size, use_homo_grad=False):
+    def densify_and_prune(self, max_grad, max_grad_abs, min_opacity, extent, max_screen_size, use_homo_grad=False, opacity_correction=False):
         grads = self.xyz_gradient_accum / self.denom
         grads[grads.isnan()] = 0.0
 
         grads_abs = self.xyz_gradient_accum_abs / self.denom
         grads_abs[grads.isnan()] = 0.0
 
-        self.densify_and_clone(grads, max_grad, extent)
+        self.densify_and_clone(grads, max_grad, extent, opacity_correction)
         if use_homo_grad:
             self.densify_and_split(grads_abs, max_grad_abs, extent)
         else:
@@ -423,9 +441,9 @@ class GaussianModel:
         # batch_viewspace_point_tensor [B, P, 4]
         # batch_visibility_filter [B, P]
         # batch_radii [B, P]
-        assert len(batch_viewspace_point_tensor) == 3
-        assert len(batch_visibility_filter) == 2
-        assert len(batch_radii) == 2
+        assert len(batch_viewspace_point_tensor.shape) == 3
+        assert len(batch_visibility_filter.shape) == 2
+        assert len(batch_radii.shape) == 2
 
         # Keep track of max radii in image-space for pruning
         visibility_filter = torch.any(batch_visibility_filter, dim=0) # [P]

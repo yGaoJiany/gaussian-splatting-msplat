@@ -48,6 +48,9 @@ class ModelParams(ParamGroup):
     def __init__(self, parser, sentinel=False):
         self.sh_degree = 3                       # msplat2: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         self._batch = 1                          # msplat2: batch size
+        self.load_max_error = -1.0               # msplat2: Threshold for loading points based on reprojection error; load all points if set to -1.
+        self.load_min_track = -1.0               # msplat2: Minimum track length required for loading points; load all points if set to -1.
+
         self._source_path = ""
         self._model_path = ""
         self._images = "images"
@@ -94,8 +97,14 @@ class OptimizationParams(ParamGroup):
         self.densify_from_iter = 500
         self.densify_until_iter = 15_000
         self.densify_grad_threshold = 0.0002
-        self.densify_grad_abs_threshold = 0.0004
+        self.densify_grad_abs_threshold = 0.0008   # msplat2: Threshold for splitting based on cumulative homo-direction gradient.
         self.random_background = False
+
+        self.opacity_correction = False         # msplat2: Whether to correct the opacity after cloning.
+        self.init_prune = False                 # msplat2: Whether to perform an initial scaling-based prune before optimization.
+        self.reduce_opacity = False             # msplat2: Whether to periodically reduce opacity during optimization to eliminate floaters.
+        self.opacity_reduce_interval = 500      # msplat2: Interval for reducing opacity.
+
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):
